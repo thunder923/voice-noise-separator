@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+python-multipart
+numpy
+scipy
+# --- AI engines (all free). Verified install recipe (2026-10-27, this VM) ---
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+#   NOTE: torchaudio must be the +cpu build; if a plain build got installed
+#   first (it needs CUDA libs), re-run with --upgrade from the CPU index.
+# pip install clearvoice soundfile     # MossFormer2_SE_48K
+# pip install deepfilternet            # DeepFilterNet3; its DeepFilterLib is a
+#   Rust extension — on machines without a prebuilt wheel, install Rust
+#   (https://rustup.rs) first so pip can build it.
+# Do NOT install torchcodec: its native lib conflicts in this stack, and
+# core/separator.py shims torchaudio.load/info for DeepFilterNet instead.
+# --- optional Pro Tools bridge ---
+# py-ptsl

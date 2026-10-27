@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>声とノイズの分離 — Voice / Noise Separator</title>
+<style>
+  body{font-family:-apple-system,"Hiragino Sans",sans-serif;background:#14161a;color:#eee;margin:0;padding:20px}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:22px} h1 .en{color:#f5c542;font-size:14px}
+  .card{background:#1e2127;border-radius:12px;padding:18px;margin:14px 0}
+  #drop{border:2px dashed #555;border-radius:12px;padding:34px;text-align:center;cursor:pointer}
+  #drop.over{border-color:#f5c542;background:#262a31}
+  label{font-size:13px;color:#bbb}
+  input[type=range]{width:100%}
+  select,button{background:#2b2f36;color:#eee;border:1px solid #444;border-radius:8px;padding:9px 14px;font-size:14px}
+  button.primary{background:#f5c542;color:#111;font-weight:700;border:none;cursor:pointer}
+  button:disabled{opacity:.5}
+  .stem{margin:12px 0}.stem b{display:block;margin-bottom:6px}
+  .stem.voice b{color:#7ee787}.stem.noise b{color:#79c0ff}
+  audio{width:100%}
+  .dl{color:#f5c542;font-size:13px}
+  #status{white-space:pre-wrap;font-size:13px;color:#bbb}
+  .note{font-size:12px;color:#888;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎙 声とノイズの分離 <span class="en">VOICE / NOISE SEPARATOR — 映画録音の整音用</span></h1>
+
+  <div class="card">
+    <div id="drop">音声・動画ファイルをドロップ（またはクリックで選択）<br>
+      <span class="note">WAV / MP3 / FLAC / MP4 / MOV など。動画は音声だけ取り出します。全てこのマシンの中で処理します（アップロード先は自分のサーバーだけ）</span>
+      <input type="file" id="file" accept="audio/*,video/*" hidden>
+    </div>
+    <p><label>分離エンジン
+      <select id="engine">
+        <option value="spectral">標準（軽量・モデル不要）</option>
+        <option value="deepfilternet">DeepFilterNet（AI・要インストール）</option>
+        <option value="mossformer2">MossFormer2 48K（AI・最高品質／重い・要インストール）</option>
+      </select></label></p>
+    <p><label>分離の強さ <span id="strengthVal">0.80</span>
+      <input type="range" id="strength" min="0" max="1" step="0.05" value="0.8"></label><br>
+      <span class="note">弱い＝声は自然だがノイズが残る／強い＝ノイズは減るが声が痩せやすい。整音では 0.7〜0.85 が目安</span></p>
+    <p><label>ノイズ別の先行修復（分離の前に効かせる）</label><br>
+      <label><input type="checkbox" id="fixClicks" checked> 📶 ワイヤレスのパチパチ／ビリビリ（RFヒット・クリック除去）</label><br>
+      <label><input type="checkbox" id="fixHum" checked> 🔌 ハム／バズ（電源ノイズ 50/60Hz＋倍音を自動検出して除去）</label><br>
+      <label><input type="checkbox" id="fixDropouts" checked> ✂️ ワイヤレスのドロップアウト（音切れの穴埋め）</label><br>
+      <label><input type="checkbox" id="fixWind"> 🌬 風・吹かれ（低音のゴーッという成分を抑える）</label><br>
+      <label><input type="checkbox" id="fixAmbience" checked> 🍃 環境音・ガサガサ（風景音／衣擦れ／部屋の定常ノイズを全体に抑える・通常のノイズリダクション）</label></p>
+    <p><button class="primary" id="go" disabled>分離する</button></p>
+    <div id="status"></div>
+  </div>
+
+  <div class="card" id="result" hidden>
+    <div class="stem"><b>🔊 原音</b><audio id="pOrig" controls></audio></div>
+    <div class="stem voice"><b>🗣 声だけ（VOICE）</b><audio id="pVoice" controls></audio>
+      <a class="dl" id="dVoice" download>⬇ VOICE.wav を保存（24bit / 48kHz）</a></div>
+    <div class="stem noise"><b>🌬 ノイズだけ（NOISE = 原音 − 声）</b><audio id="pNoise" controls></audio>
+      <a class="dl" id="dNoise" download>⬇ NOISE.wav を保存（24bit / 48kHz）</a></div>
+    <p class="note">VOICE + NOISE を足すと原音に完全に戻ります（検証済み）。Pro Tools に2トラックで入れて、
+      フェーダーバランスを変えるだけで「セリフ vs 空気感」を後から調整できます。
+      片方だけ書き出したい時もこの1画面で両方取れます。</p>
+  </div>
+
+  <p class="note">Pro Tools連携: <code>protools/ptsl_bridge.py</code> を使うと、開いているセッションへ
+  VOICE / NOISE の2トラックを自動でインポート＆配置できます（詳細は README）。</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let file=null;
+const drop=$('drop'), fi=$('file');
+drop.onclick=()=>fi.click();
+fi.onchange=()=>{file=fi.files[0]; upd();}
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over');};
+drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');file=e.dataTransfer.files[0];upd();};
+function upd(){ $('go').disabled=!file; if(file) drop.firstChild.textContent='選択中: '+file.name+' '; }
+$('strength').oninput=e=>$('strengthVal').textContent=(+e.target.value).toFixed(2);
+$('go').onclick=async()=>{
+  $('go').disabled=true; $('status').textContent='分離中…（長いファイルは時間がかかります）';
+  const fd=new FormData(); fd.append('file',file); fd.append('engine',$('engine').value); fd.append('strength',$('strength').value);
+  fd.append('fix_clicks',$('fixClicks').checked); fd.append('fix_hum',$('fixHum').checked);
+  fd.append('fix_dropouts',$('fixDropouts').checked); fd.append('fix_wind',$('fixWind').checked);
+  fd.append('fix_ambience',$('fixAmbience').checked);
+  const r=await (await fetch('/api/separate',{method:'POST',body:fd})).json();
+  $('go').disabled=false;
+  if(!r.ok){ $('status').textContent='⚠ '+r.error; return; }
+  $('status').textContent=`完了: ${r.duration_sec}秒 / ${r.sample_rate}Hz / 使用エンジン: ${r.engine_used}`+(r.notes&&r.notes.length?'\n'+r.notes.join('\n'):'');
+  $('pOrig').src=URL.createObjectURL(file);
+  $('pVoice').src=r.voice_url; $('pNoise').src=r.noise_url;
+  $('dVoice').href=r.voice_url; $('dNoise').href=r.noise_url;
+  $('result').hidden=false;
+};
+</script>
+</body>
+</html>
