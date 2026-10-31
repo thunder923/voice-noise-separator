@@ -16,6 +16,19 @@
     var el = document.documentElement;
     el.setAttribute("data-device", dev);
     el.setAttribute("data-screen", pw + "x" + ph);
+    // ウィンドウ幅でレイアウトを切り替える (リサイズにライブで追従、リロードはしない)
+    function applyWin() {
+      var w = window.innerWidth || el.clientWidth || 0;
+      el.dataset.win = w <= 640 ? "narrow" : (w <= 1024 ? "medium" : "wide");
+    }
+    var winTimer = null;
+    function onWinChange() {
+      if (winTimer) clearTimeout(winTimer);
+      winTimer = setTimeout(applyWin, 100);
+    }
+    applyWin();
+    window.addEventListener("resize", onWinChange);
+    window.addEventListener("orientationchange", onWinChange);
   })();
 </script>
 <title>声とノイズの分離 — Voice / Noise Separator</title>
@@ -48,13 +61,24 @@
   .dl{color:#f5c542;font-size:13px}
   #status{white-space:pre-wrap;font-size:13px;color:#bbb}
   .note{font-size:12px;color:#888;line-height:1.7}
-  /* 端末適応 (device-adaptive): 端末クラスで出し分け */
+  /* 端末適応 (device-adaptive): 物理端末クラスで出し分け (セーフエリア等の端末固有分のみ) */
   html[data-device="phone"] body{min-height:100dvh;padding-top:calc(12px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-bottom:calc(12px + env(safe-area-inset-bottom))}
   html[data-device="phone"] .wrap{max-width:100%}
   html[data-device="phone"] select,html[data-device="phone"] button{min-height:44px}
-  html[data-device="tablet"] .wrap{max-width:920px}
-  html[data-device="desktop"] .wrap{max-width:1040px}
-  html[data-device="desktop"] body{padding:32px}
+  /* ウィンドウ適応 (window-adaptive): 今のウィンドウ幅でレイアウトを切り替える (リサイズにライブで追従) */
+  html[data-win="narrow"] body{padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left))}
+  html[data-win="narrow"] .wrap{max-width:100%}
+  html[data-win="narrow"] .card{padding:14px}
+  html[data-win="narrow"] h1{font-size:19px}
+  html[data-win="narrow"] h1 .en{display:block;margin-top:4px}
+  html[data-win="narrow"] #drop{padding:24px 12px;overflow-wrap:anywhere}
+  html[data-win="narrow"] select{width:100%;max-width:100%}
+  html[data-win="narrow"] select,html[data-win="narrow"] button{min-height:44px}
+  html[data-win="narrow"] input[type=checkbox]{width:20px;height:20px;vertical-align:middle}
+  html[data-win="narrow"] .card label{line-height:1.7}
+  html[data-win="medium"] .wrap{max-width:920px}
+  html[data-win="wide"] .wrap{max-width:1040px}
+  html[data-win="wide"] body{padding:32px}
 </style>
 </head>
 <body>
