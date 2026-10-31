@@ -61,6 +61,12 @@
   .dl{color:#f5c542;font-size:13px}
   #status{white-space:pre-wrap;font-size:13px;color:#bbb}
   .note{font-size:12px;color:#888;line-height:1.7}
+  details.info summary{cursor:pointer;font-weight:700;font-size:15px;min-height:44px;display:flex;align-items:center;list-style:none}
+  details.info summary::-webkit-details-marker{display:none}
+  details.info .ib{font-size:13px;line-height:1.8;color:#ccc;overflow-wrap:anywhere}
+  details.info .ib h3{font-size:13px;color:#f5c542;margin:14px 0 4px}
+  details.info .ib ul,details.info .ib ol{margin:4px 0 10px;padding-left:20px}
+  details.info .ib li{margin:3px 0}
   /* 端末適応 (device-adaptive): 物理端末クラスで出し分け (セーフエリア等の端末固有分のみ) */
   html[data-device="phone"] body{min-height:100dvh;padding-top:calc(12px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-bottom:calc(12px + env(safe-area-inset-bottom))}
   html[data-device="phone"] .wrap{max-width:100%}
@@ -122,6 +128,48 @@
 
   <p class="note">Pro Tools連携: <code>protools/ptsl_bridge.py</code> を使うと、開いているセッションへ
   VOICE / NOISE の2トラックを自動でインポート＆配置できます（詳細は README）。</p>
+
+  <details class="card info">
+    <summary>📖 使い方</summary>
+    <div class="ib">
+      <h3>起動</h3>
+      <ul>
+        <li>Mac: <code>mac/一発起動.command</code> をダブルクリックすると、サーバーが起動して Safari でこの画面が開きます。</li>
+        <li>直接起動: <code>.venv/bin/python app.py</code> → ブラウザで <code>http://localhost:8200</code></li>
+      </ul>
+      <h3>基本操作</h3>
+      <ol>
+        <li>音声・動画ファイルをドロップ（またはクリックで選択）。動画は音声だけ取り出します。</li>
+        <li>分離エンジンと「分離の強さ」を選ぶ（迷ったら標準エンジン・強さ 0.7〜0.85）。</li>
+        <li>ノイズ別の先行修復は、気になるノイズのものだけ ON にする。</li>
+        <li>「分離する」→ 原音 / VOICE / NOISE を聴き比べて、それぞれの WAV を保存（24bit / 48kHz）。</li>
+      </ol>
+      <h3>保存先</h3>
+      <ul>
+        <li>保存ボタンでダウンロードしたファイルは、ブラウザのダウンロード先に入ります。</li>
+        <li>処理したファイルは、このツールの中の <code>work</code> フォルダにも残ります（下のプライバシー参照）。</li>
+      </ul>
+      <h3>注意点</h3>
+      <ul>
+        <li>長いファイルや AI エンジンは処理に時間がかかります。</li>
+        <li>AI エンジン（DeepFilterNet / MossFormer2）が入っていない環境では、自動で標準（spectral）に切り替わり、画面にその旨が表示されます。</li>
+        <li>VOICE + NOISE を足すと原音に完全に戻るので、消しすぎても後からフェーダーで取り戻せます。</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="card info">
+    <summary>🔒 プライバシーポリシー</summary>
+    <div class="ib">
+      <ul>
+        <li><b>音声・動画ファイルが外部へ送信されることはありません。</b>分離・修復の処理は、すべてお使いのコンピュータの中だけで完結します（処理プログラムに外部へ送信する仕組み自体がありません）。</li>
+        <li>ブラウザからこのツールへ渡したファイルは、処理のためにツール内の <code>work</code> フォルダに保存され、結果の再生・ダウンロードもそこから行われます。サーバーを止めても自動では消えないので、不要になったら <code>work</code> フォルダの中身を削除してください。</li>
+        <li>AI エンジン（DeepFilterNet / MossFormer2）の処理もこのマシンの中で実行されます。モデルのダウンロードはセットアップ（AIセットアップ）のときだけで、音声データが外に出ることはありません。</li>
+        <li>作者への送信や、利用状況の収集（アクセス解析・テレメトリ）はありません。</li>
+        <li>この画面は同じネットワーク（自宅 LAN / Tailscale）内の端末からも開けます。パスワード等の認証はないので、信頼できるネットワークの中だけで使ってください。</li>
+      </ul>
+    </div>
+  </details>
 </div>
 <script>
 const $=id=>document.getElementById(id);
