@@ -35,6 +35,22 @@ echo "--- ClearVoice（MossFormer2用）をインストールします ---"
 "$PIP" install clearvoice soundfile
 echo
 
+# 4.5) RE-USE (NVIDIA NemotronLabs RE-USE) — モデル一式を checkpoints/ へ
+echo "--- RE-USE モデルをダウンロードします（約38MB）---"
+"$PIP" install safetensors huggingface_hub
+if "$PY" - <<'PYEOF'
+from huggingface_hub import snapshot_download
+snapshot_download("nvidia/NVIDIA-NemotronLabs-RE-USE",
+                  local_dir="checkpoints/NVIDIA-NemotronLabs-RE-USE")
+print("RE-USE snapshot downloaded")
+PYEOF
+then
+  echo "✅ RE-USE モデルのダウンロード完了"
+else
+  echo "⚠️ RE-USE のダウンロードに失敗しました（ネット接続を確認してください）。他のエンジンは使えます。"
+fi
+echo
+
 # 5) DeepFilterNet3（Rustビルドが必要な環境では失敗することがある）
 echo "--- DeepFilterNet をインストールします ---"
 if ! "$PIP" install deepfilternet; then
@@ -65,6 +81,17 @@ try:
     ok.append("clearvoice")
 except Exception as e:
     print(f"❌ clearvoice の読み込みに失敗: {e}")
+
+try:
+    sys.path.insert(0, ".")
+    from core import reuse_engine
+    if reuse_engine.available():
+        print("✅ RE-USE（NemotronLabs）モデル配置済み")
+        ok.append("reuse")
+    else:
+        print("⚠️ RE-USE は未配置です（上のダウンロード結果を確認してください）")
+except Exception as e:
+    print(f"⚠️ RE-USE の確認に失敗: {e}")
 
 try:
     sys.path.insert(0, ".")

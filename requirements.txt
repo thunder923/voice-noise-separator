@@ -13,5 +13,9 @@ scipy
 #   (https://rustup.rs) first so pip can build it.
 # Do NOT install torchcodec: its native lib conflicts in this stack, and
 # core/separator.py shims torchaudio.load/info for DeepFilterNet instead.
+# --- RE-USE engine (core/reuse_engine.py): model snapshot, downloaded once ---
+# pip install safetensors huggingface_hub
+# python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/NVIDIA-NemotronLabs-RE-USE', local_dir='checkpoints/NVIDIA-NemotronLabs-RE-USE')"
+# mamba_ssm is NOT required: core/mamba_cpu.py replaces it on CPU / Apple Silicon.
 # --- optional Pro Tools bridge ---
 # py-ptsl

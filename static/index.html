@@ -101,6 +101,7 @@
         <option value="spectral">標準（軽量・モデル不要）</option>
         <option value="deepfilternet">DeepFilterNet（AI・要インストール）</option>
         <option value="mossformer2">MossFormer2 48K（AI・最高品質／重い・要インストール）</option>
+        <option value="reuse">RE-USE（AI・万能修復：ノイズ＋残響＋劣化／かなり重い・要インストール）</option>
       </select></label></p>
     <p><label>分離の強さ <span id="strengthVal">0.80</span>
       <input type="range" id="strength" min="0" max="1" step="0.05" value="0.8"></label><br>
@@ -152,7 +153,8 @@
       <h3>注意点</h3>
       <ul>
         <li>長いファイルや AI エンジンは処理に時間がかかります。</li>
-        <li>AI エンジン（DeepFilterNet / MossFormer2）が入っていない環境では、自動で標準（spectral）に切り替わり、画面にその旨が表示されます。</li>
+        <li>AI エンジン（DeepFilterNet / MossFormer2 / RE-USE）が入っていない環境では、自動で標準（spectral）に切り替わり、画面にその旨が表示されます。</li>
+        <li>RE-USE はノイズに加えて残響・音割れ・音質劣化まで修復する万能型ですが、CPUでは実時間の数十倍かかることがあります。短いクリップ向けです。</li>
         <li>VOICE + NOISE を足すと原音に完全に戻るので、消しすぎても後からフェーダーで取り戻せます。</li>
       </ul>
     </div>
@@ -164,7 +166,7 @@
       <ul>
         <li><b>音声・動画ファイルが外部へ送信されることはありません。</b>分離・修復の処理は、すべてお使いのコンピュータの中だけで完結します（処理プログラムに外部へ送信する仕組み自体がありません）。</li>
         <li>ブラウザからこのツールへ渡したファイルは、処理のためにツール内の <code>work</code> フォルダに保存され、結果の再生・ダウンロードもそこから行われます。サーバーを止めても自動では消えないので、不要になったら <code>work</code> フォルダの中身を削除してください。</li>
-        <li>AI エンジン（DeepFilterNet / MossFormer2）の処理もこのマシンの中で実行されます。モデルのダウンロードはセットアップ（AIセットアップ）のときだけで、音声データが外に出ることはありません。</li>
+        <li>AI エンジン（DeepFilterNet / MossFormer2 / RE-USE）の処理もこのマシンの中で実行されます。モデルのダウンロードはセットアップ（AIセットアップ）のときだけで、音声データが外に出ることはありません。</li>
         <li>作者への送信や、利用状況の収集（アクセス解析・テレメトリ）はありません。</li>
         <li>この画面は同じネットワーク（自宅 LAN / Tailscale）内の端末からも開けます。パスワード等の認証はないので、信頼できるネットワークの中だけで使ってください。</li>
       </ul>

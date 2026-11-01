@@ -20,6 +20,11 @@ Engines:
                   installed. Highest quality offline model
                   (MossFormer2_SE_48K, PESQ 3.15 / SI-SDR 19.38 in the paper),
                   best suited for final film dialogue cleanup.
+  - "reuse"     : optional, NVIDIA NemotronLabs RE-USE (OpenMDW-1.1),
+                  a 9.6M-parameter universal speech enhancement model that
+                  also repairs reverb / clipping / codec artifacts, if the
+                  model snapshot is downloaded into checkpoints/ (see
+                  core/reuse_engine.py). Quality-first but slow on CPU.
   If an optional engine is requested but not installed, we fall back to
   "spectral" and report that in the result metadata — never fail silently.
 """
@@ -285,6 +290,14 @@ def _enhance_mossformer2(data: np.ndarray, sr: int) -> np.ndarray | None:
     return _via_temp_wav(data, sr, run)
 
 
+def _enhance_reuse(data: np.ndarray, sr: int) -> np.ndarray | None:
+    try:
+        from . import reuse_engine
+        return reuse_engine.enhance(data, sr)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------- public API
 DEFAULT_REPAIR = {"clicks": True, "hum": True, "dropouts": True, "wind": False,
                   "ambience": True}
@@ -309,8 +322,10 @@ def separate(data: np.ndarray, sr: int, engine: str = "spectral",
         work, repair_report = run_repair(data, sr, sensitivity=1.0, **opts)
         notes.append(f"repair: {repair_report}")
 
-    if engine in ("deepfilternet", "mossformer2"):
-        fn = _enhance_deepfilternet if engine == "deepfilternet" else _enhance_mossformer2
+    if engine in ("deepfilternet", "mossformer2", "reuse"):
+        fn = {"deepfilternet": _enhance_deepfilternet,
+              "mossformer2": _enhance_mossformer2,
+              "reuse": _enhance_reuse}[engine]
         voice = fn(work, sr)
         if voice is not None:
             used = engine

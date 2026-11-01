@@ -28,7 +28,13 @@ def index():
 
 @app.get("/api/engines")
 def engines():
-    avail = {"spectral": True, "deepfilternet": False, "mossformer2": False}
+    avail = {"spectral": True, "deepfilternet": False, "mossformer2": False,
+             "reuse": False}
+    try:
+        from core import reuse_engine
+        avail["reuse"] = reuse_engine.available()
+    except Exception:
+        pass
     try:
         import torch  # noqa: F401
         from core.separator import _patch_torchaudio_for_dfn
