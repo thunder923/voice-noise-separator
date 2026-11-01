@@ -4,6 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <script>
+  // テーマ切替: 'auto' は OS の prefers-color-scheme に従う (既定)。選択は localStorage 'theme-mode' に保持。
+  (function () {
+    function getMode() { try { return localStorage.getItem('theme-mode') || 'auto'; } catch (e) { return 'auto'; } }
+    function applyTheme() {
+      var m = getMode();
+      var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    }
+    applyTheme();
+    window.__applyTheme = applyTheme;
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    function onOsChange() { if (getMode() === 'auto') applyTheme(); }
+    if (mq.addEventListener) mq.addEventListener('change', onOsChange);
+    else if (mq.addListener) mq.addListener(onOsChange);
+    document.addEventListener('DOMContentLoaded', function () {
+      var sel = document.getElementById('themeModeSel');
+      if (!sel) return;
+      sel.value = getMode();
+      sel.addEventListener('change', function () {
+        try { localStorage.setItem('theme-mode', sel.value); } catch (e) {}
+        applyTheme();
+      });
+    });
+  })();
+</script>
+<script>
   // 端末認識: 実画面サイズ (screen.width × devicePixelRatio) とタッチ有無から端末クラスを付ける
   (function () {
     var dpr = window.devicePixelRatio || 1;
@@ -34,7 +60,11 @@
 <title>声とノイズの分離 — Voice / Noise Separator</title>
 <style>
   *{box-sizing:border-box}
-  body{font-family:-apple-system,"Hiragino Sans",sans-serif;background:#14161a;color:#eee;margin:0;padding:20px;overflow-x:hidden}
+  :root{--bg:#f4f5f7;--panel:#ffffff;--panel2:#eceef1;--text:#1d1f23;--subtext:#5f6368;--border:#c9ccd1;--input-bg:#ffffff;--accent:#f5c542;--voice:#1a7f37;--noise:#0969da}
+  [data-theme="dark"]{--bg:#14161a;--panel:#1e2127;--panel2:#262a31;--text:#eeeeee;--subtext:#8a8f98;--border:#44484f;--input-bg:#2b2f36;--accent:#f5c542;--voice:#7ee787;--noise:#79c0ff}
+  .themebar{text-align:right;margin:2px 0 10px;font-size:12px;color:var(--subtext)}
+  .themebar select{padding:5px 8px;font-size:12px;width:auto;min-height:32px}
+  body{font-family:-apple-system,"Hiragino Sans",sans-serif;background:var(--bg);color:var(--text);margin:0;padding:20px;overflow-x:hidden}
   .wrap{max-width:820px;margin:0 auto;min-width:0}
   @media (max-width:640px){
     body{padding:12px}
@@ -46,25 +76,25 @@
     input[type=checkbox]{width:20px;height:20px;vertical-align:middle}
     .card label{line-height:1.7}
   }
-  h1{font-size:22px} h1 .en{color:#f5c542;font-size:14px}
-  .card{background:#1e2127;border-radius:12px;padding:18px;margin:14px 0}
-  #drop{border:2px dashed #555;border-radius:12px;padding:34px;text-align:center;cursor:pointer}
-  #drop.over{border-color:#f5c542;background:#262a31}
-  label{font-size:13px;color:#bbb}
+  h1{font-size:22px} h1 .en{color:var(--accent);font-size:14px}
+  .card{background:var(--panel);border-radius:12px;padding:18px;margin:14px 0}
+  #drop{border:2px dashed var(--border);border-radius:12px;padding:34px;text-align:center;cursor:pointer}
+  #drop.over{border-color:var(--accent);background:var(--panel2)}
+  label{font-size:13px;color:var(--subtext)}
   input[type=range]{width:100%}
-  select,button{background:#2b2f36;color:#eee;border:1px solid #444;border-radius:8px;padding:9px 14px;font-size:14px}
-  button.primary{background:#f5c542;color:#111;font-weight:700;border:none;cursor:pointer}
+  select,button{background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px 14px;font-size:14px}
+  button.primary{background:var(--accent);color:#111;font-weight:700;border:none;cursor:pointer}
   button:disabled{opacity:.5}
   .stem{margin:12px 0}.stem b{display:block;margin-bottom:6px}
-  .stem.voice b{color:#7ee787}.stem.noise b{color:#79c0ff}
+  .stem.voice b{color:var(--voice)}.stem.noise b{color:var(--noise)}
   audio{width:100%}
-  .dl{color:#f5c542;font-size:13px}
-  #status{white-space:pre-wrap;font-size:13px;color:#bbb}
-  .note{font-size:12px;color:#888;line-height:1.7}
+  .dl{color:var(--accent);font-size:13px}
+  #status{white-space:pre-wrap;font-size:13px;color:var(--subtext)}
+  .note{font-size:12px;color:var(--subtext);line-height:1.7}
   details.info summary{cursor:pointer;font-weight:700;font-size:15px;min-height:44px;display:flex;align-items:center;list-style:none}
   details.info summary::-webkit-details-marker{display:none}
-  details.info .ib{font-size:13px;line-height:1.8;color:#ccc;overflow-wrap:anywhere}
-  details.info .ib h3{font-size:13px;color:#f5c542;margin:14px 0 4px}
+  details.info .ib{font-size:13px;line-height:1.8;color:var(--text);overflow-wrap:anywhere}
+  details.info .ib h3{font-size:13px;color:var(--accent);margin:14px 0 4px}
   details.info .ib ul,details.info .ib ol{margin:4px 0 10px;padding-left:20px}
   details.info .ib li{margin:3px 0}
   /* 端末適応 (device-adaptive): 物理端末クラスで出し分け (セーフエリア等の端末固有分のみ) */
@@ -90,6 +120,7 @@
 <body>
 <div class="wrap">
   <h1>🎙 声とノイズの分離 <span class="en">VOICE / NOISE SEPARATOR — 映画録音の整音用</span></h1>
+  <div class="themebar"><label>表示テーマ <select id="themeModeSel"><option value="auto">自動（OS連動）</option><option value="light">ライト</option><option value="dark">ダーク</option></select></label></div>
 
   <div class="card">
     <div id="drop">音声・動画ファイルをドロップ（またはクリックで選択）<br>
