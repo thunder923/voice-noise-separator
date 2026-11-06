@@ -15,7 +15,7 @@ If py-ptsl / Pro Tools is not available, it still does the separation and
 prints the two file paths for manual drag-import — it never fails silently.
 
 Usage:
-  python ptsl_bridge.py /path/to/clip.wav [--strength 0.8] [--engine spectral]
+  python ptsl_bridge.py /path/to/clip.wav [--strength 0.65] [--engine spectral]
   python ptsl_bridge.py --import-only clip_VOICE.wav clip_NOISE.wav
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+", help="clip.wav 1つ（分離から） / --import-only 時は VOICE と NOISE の2つ")
     ap.add_argument("--import-only", action="store_true")
-    ap.add_argument("--strength", type=float, default=0.8)
+    ap.add_argument("--strength", type=float, default=0.65)
     ap.add_argument("--engine", default="spectral")
     args = ap.parse_args()
 

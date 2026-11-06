@@ -20,6 +20,11 @@ Engines:
                   installed. Highest quality offline model
                   (MossFormer2_SE_48K, PESQ 3.15 / SI-SDR 19.38 in the paper),
                   best suited for final film dialogue cleanup.
+  - "dbs"       : optional, DBS-TIGER-DnR (Apache-2.0) — a different mode
+                  rather than an enhancement: 3-stem separation of film /
+                  video audio into dialogue / sound effects / music (mono,
+                  44.1 kHz model). voice = dialogue, extra_stems = sfx/music,
+                  noise = residual, so all stems still sum to the original.
   - "reuse"     : optional, NVIDIA NemotronLabs RE-USE (OpenMDW-1.1),
                   a 9.6M-parameter universal speech enhancement model that
                   also repairs reverb / clipping / codec artifacts, if the
@@ -125,6 +130,9 @@ class SeparationResult:
     engine_used: str
     engine_requested: str
     notes: list[str] = field(default_factory=list)
+    # multi-stem engines (dbs): extra stems by name, e.g. {"sfx":..., "music":...}.
+    # Invariant then extends: voice + noise + sum(extra_stems) == original (mono).
+    extra_stems: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- spectral engine
@@ -298,13 +306,41 @@ def _enhance_reuse(data: np.ndarray, sr: int) -> np.ndarray | None:
         return None
 
 
+def _separate_dbs(data: np.ndarray, sr: int) -> dict | None:
+    """DBS-TIGER-DnR 3-stem separation -> {"speech","sfx","music"} or None."""
+    try:
+        from . import dbs_engine
+        return dbs_engine.separate3(data, sr)
+    except Exception:
+        return None
+
+
+def _separate_bandit(data: np.ndarray, sr: int) -> dict | None:
+    """BandIt Plus 3-stem separation (stereo) -> {"speech","sfx","music"} or None.
+
+    PERSONAL EDITION ONLY (checkpoint license terms unstated)."""
+    try:
+        from . import bandit_engine
+        return bandit_engine.separate3(data, sr)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------- public API
+# Naturalness-first defaults (Kanta 2026-11-06: "a removal that does not
+# sound fake matters more than maximum removal"). Strength is kept moderate
+# and a slice of the removed sound is mixed back into the voice stem so AI
+# engines do not sound watery / metallic / gated. Max removal is opt-in.
+DEFAULT_STRENGTH = 0.65
+DEFAULT_NATURAL = 0.20
+
 DEFAULT_REPAIR = {"clicks": True, "hum": True, "dropouts": True, "wind": False,
                   "ambience": True}
 
 
 def separate(data: np.ndarray, sr: int, engine: str = "spectral",
-             strength: float = 0.8, repair_opts: dict | None = None) -> SeparationResult:
+             strength: float = DEFAULT_STRENGTH, natural: float = DEFAULT_NATURAL,
+             repair_opts: dict | None = None) -> SeparationResult:
     """Separate [ch, samples] float audio into voice / noise stems.
 
     Pipeline: targeted repair (clicks / hum / dropouts / wind) -> enhancement
@@ -317,10 +353,62 @@ def separate(data: np.ndarray, sr: int, engine: str = "spectral",
     work = data
     repair_report: dict = {}
     opts = {**DEFAULT_REPAIR, **(repair_opts or {})}
+    want_dereverb = bool(opts.pop("dereverb", False))  # not a repair.py option
     if any(opts.values()):
         from .repair import repair as run_repair
         work, repair_report = run_repair(data, sr, sensitivity=1.0, **opts)
         notes.append(f"repair: {repair_report}")
+    if want_dereverb:
+        try:
+            from . import dereverb_engine
+            work = dereverb_engine.process(work, sr)
+            notes.append("dereverb: AI reverb removal applied (MelBand RoFormer, personal edition)")
+        except Exception:
+            notes.append("dereverb is not installed in this environment; skipped.")
+
+    if engine == "dbs":
+        stems = _separate_dbs(work, sr)
+        if stems is not None:
+            # DnR is mono: the invariant is kept against the mono downmix.
+            # voice = dialogue, extra stems = sfx / music, and "noise" is the
+            # residual so voice + sfx + music + noise == original mono exactly.
+            mono_orig = to_mono(data)[None, :].astype(np.float32)
+            speech = stems["speech"].astype(np.float32)
+            extra = {"sfx": stems["sfx"].astype(np.float32),
+                     "music": stems["music"].astype(np.float32)}
+            residual = (mono_orig - speech - extra["sfx"] - extra["music"]).astype(np.float32)
+            nat = float(np.clip(natural, 0.0, 0.9))
+            if nat > 0:
+                speech = (speech + nat * residual).astype(np.float32)
+                residual = ((1.0 - nat) * residual).astype(np.float32)
+                notes.append(f"natural: ambience return {nat:.2f} from residual (naturalness priority)")
+            notes.append("dbs: 3-stem separation (dialogue / sfx / music), mono output")
+            return SeparationResult(voice=speech, noise=residual, sr=sr,
+                                    engine_used="dbs", engine_requested=engine,
+                                    notes=notes, extra_stems=extra)
+        notes.append("dbs is not installed in this environment; "
+                     "fell back to the built-in spectral engine.")
+
+    if engine == "bandit":
+        stems = _separate_bandit(work, sr)
+        if stems is not None:
+            # Stereo 3-stem: voice = dialogue, extra = sfx / music, and
+            # "noise" is the residual so all stems sum back to the original.
+            speech = stems["speech"].astype(np.float32)
+            extra = {"sfx": stems["sfx"].astype(np.float32),
+                     "music": stems["music"].astype(np.float32)}
+            residual = (data - speech - extra["sfx"] - extra["music"]).astype(np.float32)
+            nat = float(np.clip(natural, 0.0, 0.9))
+            if nat > 0:
+                speech = (speech + nat * residual).astype(np.float32)
+                residual = ((1.0 - nat) * residual).astype(np.float32)
+                notes.append(f"natural: ambience return {nat:.2f} from residual (naturalness priority)")
+            notes.append("bandit: 3-stem separation (dialogue / sfx / music), stereo")
+            return SeparationResult(voice=speech, noise=residual, sr=sr,
+                                    engine_used="bandit", engine_requested=engine,
+                                    notes=notes, extra_stems=extra)
+        notes.append("bandit is not installed in this environment; "
+                     "fell back to the built-in spectral engine.")
 
     if engine in ("deepfilternet", "mossformer2", "reuse"):
         fn = {"deepfilternet": _enhance_deepfilternet,
@@ -339,41 +427,99 @@ def separate(data: np.ndarray, sr: int, engine: str = "spectral",
     if voice.shape != data.shape:  # align length exactly so residual is sample-accurate
         n = min(voice.shape[1], data.shape[1])
         voice = np.pad(voice[:, :n], ((0, 0), (0, data.shape[1] - n)))
+    # Naturalness blend: mix a slice of what was removed back into the voice.
+    # This is the only control AI engines get (they ignore `strength`), and it
+    # keeps voice + noise == original exactly, so nothing is invented.
+    nat = float(np.clip(natural, 0.0, 0.9))
+    if nat > 0:
+        voice = (voice + nat * (data - voice)).astype(np.float32)
+        notes.append(f"natural: ambience return {nat:.2f} (removed sound mixed back; naturalness priority)")
     noise = (data - voice).astype(np.float32)
     return SeparationResult(voice=voice, noise=noise, sr=sr,
                             engine_used=used, engine_requested=engine, notes=notes)
 
 
 def separate_file(in_path: str | Path, out_dir: str | Path,
-                  engine: str = "spectral", strength: float = 0.8,
-                  repair_opts: dict | None = None) -> dict:
-    """File-in / files-out. Returns paths + metadata. Used by Web, Mac and CLI."""
+                  engine: str = "spectral", strength: float = DEFAULT_STRENGTH,
+                  natural: float = DEFAULT_NATURAL,
+                  repair_opts: dict | None = None,
+                  clip_start: float = 0.0, clip_len: float | None = None,
+                  loudness: str | None = None) -> dict:
+    """File-in / files-out. Returns paths + metadata. Used by Web, Mac and CLI.
+
+    clip_start / clip_len (seconds) implement the trial-separation preview:
+    when clip_len is given, only that slice (at most 60 s) is separated so a
+    long file can be auditioned before committing to a full run. The result
+    metadata then carries a "preview" block with the slice position."""
     in_path, out_dir = Path(in_path), Path(out_dir)
     data, sr = load_audio(in_path)
     if sr != TARGET_SR:
         data, sr = resample(data, sr)
         data = data.astype(np.float32)
-    result = separate(data, sr, engine=engine, strength=strength, repair_opts=repair_opts)
+    preview = None
+    if clip_len is not None:
+        full_n = data.shape[1]
+        start = int(min(max(clip_start, 0.0), full_n / sr) * sr)
+        length = int(min(max(clip_len, 0.1), 60.0) * sr)
+        data = data[:, start:start + length]
+        preview = {"start_sec": round(start / sr, 3),
+                   "length_sec": round(data.shape[1] / sr, 3),
+                   "full_duration_sec": round(full_n / sr, 3)}
+    result = separate(data, sr, engine=engine, strength=strength, natural=natural, repair_opts=repair_opts)
+    loudness_info = None
+    if loudness:
+        from .loudness import PRESETS, gain_for_target
+        if loudness in PRESETS:
+            gain_db, measured, limited = gain_for_target(data, sr, PRESETS[loudness])
+            lin = float(10 ** (gain_db / 20.0))
+            result.voice = (result.voice * lin).astype(np.float32)
+            result.noise = (result.noise * lin).astype(np.float32)
+            result.extra_stems = {k: (v * lin).astype(np.float32)
+                                  for k, v in result.extra_stems.items()}
+            data = (data * lin).astype(np.float32)  # invariant check vs gained original
+            loudness_info = {"preset": loudness, "target_lufs": PRESETS[loudness],
+                             "measured_lufs": round(measured, 2),
+                             "gain_db": round(gain_db, 2), "peak_limited": limited}
     stem = in_path.stem
     voice_path = out_dir / f"{stem}_VOICE.wav"
     noise_path = out_dir / f"{stem}_NOISE.wav"
     save_wav(voice_path, result.voice, sr)
     save_wav(noise_path, result.noise, sr)
+    stems_info = {"voice": str(voice_path), "noise": str(noise_path)}
+    extra_paths = {}
+    for name, arr in result.extra_stems.items():
+        p = out_dir / f"{stem}_{name.upper()}.wav"
+        save_wav(p, arr, sr)
+        extra_paths[name] = str(p)
+        stems_info[name] = str(p)
+    total = result.voice + result.noise
+    for arr in result.extra_stems.values():
+        total = total + arr
+    # mono multi-stem engines (dbs) are checked against the mono downmix;
+    # stereo ones (bandit) and the classic 2-stem path against the input.
+    ref = data if total.shape == data.shape else to_mono(data)[None, :]
     return {
         "voice_path": str(voice_path),
         "noise_path": str(noise_path),
+        "extra_paths": extra_paths,
+        "stems": stems_info,
         "sample_rate": sr,
         "channels": int(data.shape[0]),
         "duration_sec": round(data.shape[1] / sr, 3),
         "engine_used": result.engine_used,
         "engine_requested": result.engine_requested,
+        "strength": strength,
+        "natural": natural,
+        "preview": preview,
+        "loudness": loudness_info,
         "notes": result.notes,
         # integrity check for the editor: stems must sum back to the original
-        "sum_max_error": float(np.max(np.abs((result.voice + result.noise) - data))),
+        # (for multi-stem engines the reference is the mono downmix)
+        "sum_max_error": float(np.max(np.abs(total - ref))),
     }
 
 
 if __name__ == "__main__":  # CLI: python -m core.separator in.wav out_dir [strength]
     import json, sys
-    strength = float(sys.argv[3]) if len(sys.argv) > 3 else 0.8
+    strength = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_STRENGTH
     print(json.dumps(separate_file(sys.argv[1], sys.argv[2], strength=strength), indent=2))
