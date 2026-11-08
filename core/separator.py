@@ -133,6 +133,8 @@ class SeparationResult:
     # multi-stem engines (dbs): extra stems by name, e.g. {"sfx":..., "music":...}.
     # Invariant then extends: voice + noise + sum(extra_stems) == original (mono).
     extra_stems: dict = field(default_factory=dict)
+    # outdoor mode: detected passing-event spans and what was done to each
+    events: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------- spectral engine
@@ -326,6 +328,128 @@ def _separate_bandit(data: np.ndarray, sr: int) -> dict | None:
         return None
 
 
+
+
+# ---------------------------------------------------------------- outdoor events
+def detect_events(data: np.ndarray, sr: int) -> list[dict]:
+    """Detect passing-event spans (train / car / bike / plane / crossing...).
+
+    Frame RMS (100 ms) in dB; baseline = 20th percentile (location bed).
+    Frames >= baseline + 10 dB sustained >= 0.7 s become an event; gaps under
+    0.8 s are merged. kind_guess is a rough shape-based label only.
+    Designed to run on the residual (data - voice) stem: dialogue lands in
+    the voice stem, so level alone does not mistake speech for an event.
+    """
+    mono = to_mono(data)
+    win = max(1, int(sr * 0.1))
+    n_frames = len(mono) // win
+    if n_frames < 10:
+        return []
+    frames = mono[:n_frames * win].reshape(n_frames, win)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-12)
+    db = 20 * np.log10(rms + 1e-9)
+    baseline = float(np.percentile(db, 20))
+    hot = db >= baseline + 10.0
+    events: list[dict] = []
+    i = 0
+    while i < n_frames:
+        if not hot[i]:
+            i += 1
+            continue
+        last = i
+        gap = 0
+        j = i
+        while j < n_frames:
+            if hot[j]:
+                last = j
+                gap = 0
+            else:
+                gap += 1
+                if gap > 8:
+                    break
+            j += 1
+        dur = (last - i + 1) * 0.1
+        if dur >= 0.7:
+            peak = float(np.max(db[i:last + 1]) - baseline)
+            if dur < 2.0:
+                kind = "短い通過・突発音"
+            elif dur <= 20.0:
+                kind = "通過音（車・電車・バイク・踏切系）"
+            else:
+                kind = "長い通過音（飛行機・電車系）"
+            events.append({"start_sec": round(i * 0.1, 2),
+                           "end_sec": round((last + 1) * 0.1, 2),
+                           "peak_db": round(peak, 1), "kind_guess": kind})
+        i = max(last + 1, i + 1)
+    return events
+
+
+def _apply_outdoor(voice: np.ndarray, data: np.ndarray, sr: int,
+                   events: list[dict]) -> tuple[np.ndarray, list[dict]]:
+    """Segment-adaptive treatment of detected events on the voice stem.
+
+    No-speech event spans are pulled down toward the baseline level
+    (aggressive is safe there: nothing spoken can turn fake). Speech event
+    spans get one extra strong spectral pass, blended at 70%. The caller
+    recomputes noise = data - voice afterwards, so the sum invariant holds.
+    """
+    if not events:
+        return voice, []
+    mono = to_mono(data)
+    win = max(1, int(sr * 0.1))
+    n_frames = len(mono) // win
+    if n_frames == 0:
+        return voice, []
+    frames = mono[:n_frames * win].reshape(n_frames, win)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-12)
+    baseline_rms = float(np.percentile(rms, 20))
+    out = voice.copy()
+    fade = max(1, int(sr * 0.05))
+    mono_v = to_mono(out)
+    mono_r = to_mono(data - out)
+
+    def _speech_present(s: int, e: int) -> bool:
+        # Speech check via spectrum shape: in a no-speech span the voice stem
+        # holds only leaked event noise, whose average spectrum is nearly
+        # identical to the residual's (cosine ~0.99 measured). Dialogue adds
+        # harmonic structure the residual lacks (cosine ~0.88-0.91 measured).
+        if e - s < 4096:
+            return True
+        _, _, zv = sp_signal.stft(mono_v[s:e], fs=sr, nperseg=2048, noverlap=1536)
+        _, _, zr = sp_signal.stft(mono_r[s:e], fs=sr, nperseg=2048, noverlap=1536)
+        va = np.mean(np.abs(zv), axis=1)
+        vb = np.mean(np.abs(zr), axis=1)
+        cos = float(va @ vb / (np.linalg.norm(va) * np.linalg.norm(vb) + 1e-12))
+        return cos < 0.96
+
+    actions: list[dict] = []
+    for ev in events:
+        s = int(ev["start_sec"] * sr)
+        e = min(int(ev["end_sec"] * sr), out.shape[1])
+        if e - s < int(sr * 0.3):
+            continue
+        seg_voice = float(np.sqrt(np.mean(out[:, s:e] ** 2) + 1e-12))
+        if not _speech_present(s, e):
+            target = max(baseline_rms, 1e-5)
+            gain = float(np.clip(target / (seg_voice + 1e-12), 0.1, 1.0))
+            g = np.full(e - s, gain, dtype=np.float32)
+            ramp = min(fade, (e - s) // 2)
+            if ramp > 0:
+                g[:ramp] = np.linspace(1.0, gain, ramp, dtype=np.float32)
+                g[-ramp:] = np.linspace(gain, 1.0, ramp, dtype=np.float32)
+            out[:, s:e] = (out[:, s:e] * g[None, :]).astype(np.float32)
+            actions.append({**ev, "speech": False,
+                            "action": f"無音部として強く抑制（×{gain:.2f}）"})
+        else:
+            pad = int(sr * 0.25)
+            s2 = max(0, s - pad)
+            e2 = min(out.shape[1], e + pad)
+            enh = _enhance_spectral(out[:, s2:e2], sr, 0.9)
+            out[:, s2:e2] = (0.3 * out[:, s2:e2] + 0.7 * enh).astype(np.float32)
+            actions.append({**ev, "speech": True,
+                            "action": "セリフあり：追加の強抑制を70%ブレンド"})
+    return out.astype(np.float32), actions
+
 # ---------------------------------------------------------------- public API
 # Naturalness-first defaults (Kanta 2026-11-06: "a removal that does not
 # sound fake matters more than maximum removal"). Strength is kept moderate
@@ -354,6 +478,7 @@ def separate(data: np.ndarray, sr: int, engine: str = "spectral",
     repair_report: dict = {}
     opts = {**DEFAULT_REPAIR, **(repair_opts or {})}
     want_dereverb = bool(opts.pop("dereverb", False))  # not a repair.py option
+    want_outdoor = bool(opts.pop("outdoor", False))  # applied after separation
     if any(opts.values()):
         from .repair import repair as run_repair
         work, repair_report = run_repair(data, sr, sensitivity=1.0, **opts)
@@ -434,9 +559,19 @@ def separate(data: np.ndarray, sr: int, engine: str = "spectral",
     if nat > 0:
         voice = (voice + nat * (data - voice)).astype(np.float32)
         notes.append(f"natural: ambience return {nat:.2f} (removed sound mixed back; naturalness priority)")
+    ev_actions: list[dict] = []
+    if want_outdoor:
+        voice, ev_actions = _apply_outdoor(voice, data, sr, detect_events((data - voice), sr))
+        if ev_actions:
+            for a in ev_actions:
+                notes.append(f"outdoor: {a['start_sec']}-{a['end_sec']}s "
+                             f"+{a['peak_db']}dB {a['kind_guess']} -> {a['action']}")
+        else:
+            notes.append("outdoor: no passing events detected")
     noise = (data - voice).astype(np.float32)
     return SeparationResult(voice=voice, noise=noise, sr=sr,
-                            engine_used=used, engine_requested=engine, notes=notes)
+                            engine_used=used, engine_requested=engine, notes=notes,
+                            events=ev_actions)
 
 
 def separate_file(in_path: str | Path, out_dir: str | Path,
@@ -513,6 +648,7 @@ def separate_file(in_path: str | Path, out_dir: str | Path,
         "preview": preview,
         "loudness": loudness_info,
         "notes": result.notes,
+        "events": result.events,
         # integrity check for the editor: stems must sum back to the original
         # (for multi-stem engines the reference is the mono downmix)
         "sum_max_error": float(np.max(np.abs(total - ref))),

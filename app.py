@@ -87,6 +87,7 @@ async def separate_endpoint(
     preview_len: float = Form(0.0),
     loudness_preset: str = Form(""),
     fix_dereverb: str = Form("false"),
+    fix_outdoor: str = Form("false"),
 ):
     job = WORK / uuid.uuid4().hex[:12]
     job.mkdir(parents=True)
@@ -100,6 +101,7 @@ async def separate_endpoint(
         "wind": fix_wind == "true",
         "ambience": fix_ambience == "true",
         "dereverb": fix_dereverb == "true",
+        "outdoor": fix_outdoor == "true",
     }
     try:
         info = separate_file(src, job, engine=engine, strength=strength,

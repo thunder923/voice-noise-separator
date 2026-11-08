@@ -230,6 +230,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
       <label class="chip"><input type="checkbox" id="fixDropouts" checked><span><span class="t">✂️ ワイヤレスのドロップアウト</span><span class="d">音切れの穴埋め</span></span></label>
       <label class="chip"><input type="checkbox" id="fixWind"><span><span class="t">🌬 風・吹かれ</span><span class="d">低音のゴーッという成分を抑える</span></span></label>
       <label class="chip"><input type="checkbox" id="fixAmbience" checked><span><span class="t">🍃 環境音・ガサガサ</span><span class="d">風景音／衣擦れ／部屋の定常ノイズを全体に抑える・通常のノイズリダクション</span></span></label>
+      <label class="chip"><input type="checkbox" id="fixOutdoor"><span><span class="t">🏞 外ノイズ対策</span><span class="d">踏切・電車・飛行機・車・バイク等の通過音を検出し、無音部は強く／セリフ部は追加抑制で処理</span></span></label>
       <label class="chip"><input type="checkbox" id="fixDereverb"><span><span class="t">🌀 AIリバーブ除去</span><span class="d">部屋の残響・風呂場っぽい響きを取る／重い・本人版のみ</span></span></label>
     </div>
 
@@ -376,7 +377,8 @@ function showResult(r, file){
   $('pOrig').src=URL.createObjectURL(file);
   const pv = r.preview ? `\n🔍 プレビュー: 元の ${r.preview.start_sec} 秒 〜 ${(r.preview.start_sec+r.preview.length_sec).toFixed(1)} 秒（全編 ${r.preview.full_duration_sec} 秒）` : '';
   const ld = r.loudness ? `\n🔊 ラウドネス: ${r.loudness.measured_lufs} LUFS → 目標 ${r.loudness.target_lufs} LUFS（ゲイン ${r.loudness.gain_db >= 0 ? '+' : ''}${r.loudness.gain_db} dB${r.loudness.peak_limited ? '・ピーク制限あり' : ''}）` : '';
-  $('status').textContent=`完了: ${r.duration_sec}秒 / ${r.sample_rate}Hz / 使用エンジン: ${r.engine_used}`+pv+ld+(r.notes&&r.notes.length?'\n'+r.notes.join('\n'):'');
+  const ev = (r.events && r.events.length) ? '\n🏞 外ノイズ検出: ' + r.events.map(e=>`${e.start_sec}〜${e.end_sec}秒（+${e.peak_db}dB・${e.kind_guess}・${e.action||''}`).join(' / ') : '';
+  $('status').textContent=`完了: ${r.duration_sec}秒 / ${r.sample_rate}Hz / 使用エンジン: ${r.engine_used}`+pv+ld+ev+(r.notes&&r.notes.length?'\n'+r.notes.join('\n'):'');
   $('pOrig').src=URL.createObjectURL(file);
   $('pVoice').src=r.voice_url; $('pNoise').src=r.noise_url;
   $('dVoice').href=r.voice_url; $('dNoise').href=r.noise_url;
@@ -411,6 +413,7 @@ $('go').onclick=async()=>{
     fd.append('fix_dropouts',$('fixDropouts').checked); fd.append('fix_wind',$('fixWind').checked);
     fd.append('fix_ambience',$('fixAmbience').checked);
     fd.append('fix_dereverb',$('fixDereverb').checked);
+    fd.append('fix_outdoor',$('fixOutdoor').checked);
     if($('previewOn').checked){ fd.append('preview_start',$('previewStart').value); fd.append('preview_len',$('previewLen').value); }
     fd.append('loudness_preset',$('loudness').value);
     const r=await (await fetch('/api/separate',{method:'POST',body:fd})).json();
