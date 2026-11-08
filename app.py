@@ -86,6 +86,9 @@ async def separate_endpoint(
     preview_start: float = Form(0.0),
     preview_len: float = Form(0.0),
     loudness_preset: str = Form(""),
+    loudness_target: str = Form(""),
+    loudness_basis: str = Form("mix"),
+    loudness_ceiling: str = Form("-1"),
     fix_dereverb: str = Form("false"),
     fix_outdoor: str = Form("false"),
 ):
@@ -109,7 +112,11 @@ async def separate_endpoint(
                              repair_opts=repair_opts,
                              clip_start=preview_start,
                              clip_len=preview_len if preview_len > 0 else None,
-                             loudness=loudness_preset or None)
+                             loudness=loudness_preset or None,
+                             loudness_target=(float(loudness_target)
+                                              if loudness_target.strip() else None),
+                             loudness_basis=loudness_basis,
+                             loudness_ceiling_db=float(loudness_ceiling))
     except Exception as e:  # ffmpeg / decode errors etc. — report plainly
         return {"ok": False, "error": f"処理に失敗しました: {e}"}
     stem_urls = {name: f"/api/download/{job.name}/{Path(p).name}"

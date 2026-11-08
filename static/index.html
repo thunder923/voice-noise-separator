@@ -242,8 +242,21 @@ body{padding-bottom:env(safe-area-inset-bottom)}
         <option value="podcast">ポッドキャスト -16 LUFS</option>
         <option value="broadcast">放送 -23 LUFS（EBU R128）</option>
         <option value="cinema">映画 -27 LUFS</option>
+        <option value="custom">カスタム（下の数値）</option>
       </select></label><br>
-      <span class="note"> BS.1770でミックス全体のラウドネスを測り、目標値に揃えます（ステム間のバランスは変えません。ピークが天井に当たる場合はゲインを抑えます）</span></p>
+      <label>カスタム目標 <input type="number" id="loudnessTarget" value="-16" min="-40" max="-6" step="0.5" style="width:6em"> LUFS</label>
+      <label>測る対象
+        <select id="loudnessBasis">
+          <option value="mix">ミックス全体</option>
+          <option value="voice">声ステム</option>
+        </select></label>
+      <label>ピーク上限
+        <select id="loudnessCeiling">
+          <option value="-1">-1 dB</option>
+          <option value="-2">-2 dB</option>
+          <option value="0">0 dB</option>
+        </select></label><br>
+      <span class="note"> BS.1770で測って目標値に揃えます（全ステムに同じゲインなのでバランスは変えません。ピークが上限に当たる場合はゲインを抑えます）</span></p>
     <p><label><input type="checkbox" id="previewOn"> 🔍 試し分離（プレビュー）— 全編の前に一部だけ分離して相性を確認</label><br>
       <label>開始 <input type="number" id="previewStart" value="0" min="0" step="1" style="width:5em"> 秒から</label>
       <label>長さ <input type="number" id="previewLen" value="15" min="5" max="60" step="1" style="width:5em"> 秒（5〜60）</label><br>
@@ -376,7 +389,7 @@ document.querySelectorAll('.preset').forEach(b=>b.onclick=()=>{ $('strength').va
 function showResult(r, file){
   $('pOrig').src=URL.createObjectURL(file);
   const pv = r.preview ? `\n🔍 プレビュー: 元の ${r.preview.start_sec} 秒 〜 ${(r.preview.start_sec+r.preview.length_sec).toFixed(1)} 秒（全編 ${r.preview.full_duration_sec} 秒）` : '';
-  const ld = r.loudness ? `\n🔊 ラウドネス: ${r.loudness.measured_lufs} LUFS → 目標 ${r.loudness.target_lufs} LUFS（ゲイン ${r.loudness.gain_db >= 0 ? '+' : ''}${r.loudness.gain_db} dB${r.loudness.peak_limited ? '・ピーク制限あり' : ''}）` : '';
+  const ld = r.loudness ? `\n🔊 ラウドネス: ${r.loudness.measured_lufs} LUFS → 目標 ${r.loudness.target_lufs} LUFS（ゲイン ${r.loudness.gain_db >= 0 ? '+' : ''}${r.loudness.gain_db} dB${r.loudness.peak_limited ? '・ピーク制限あり' : ''}${r.loudness.basis === 'voice' ? '・声ステム基準' : ''}）` : '';
   const ev = (r.events && r.events.length) ? '\n🏞 外ノイズ検出: ' + r.events.map(e=>`${e.start_sec}〜${e.end_sec}秒（+${e.peak_db}dB・${e.kind_guess}・${e.action||''}`).join(' / ') : '';
   $('status').textContent=`完了: ${r.duration_sec}秒 / ${r.sample_rate}Hz / 使用エンジン: ${r.engine_used}`+pv+ld+ev+(r.notes&&r.notes.length?'\n'+r.notes.join('\n'):'');
   $('pOrig').src=URL.createObjectURL(file);
@@ -416,6 +429,9 @@ $('go').onclick=async()=>{
     fd.append('fix_outdoor',$('fixOutdoor').checked);
     if($('previewOn').checked){ fd.append('preview_start',$('previewStart').value); fd.append('preview_len',$('previewLen').value); }
     fd.append('loudness_preset',$('loudness').value);
+    fd.append('loudness_target',$('loudnessTarget').value);
+    fd.append('loudness_basis',$('loudnessBasis').value);
+    fd.append('loudness_ceiling',$('loudnessCeiling').value);
     const r=await (await fetch('/api/separate',{method:'POST',body:fd})).json();
     if(!r.ok){ failed++; const d=document.createElement('div'); d.textContent=`⚠ ${f.name}: ${r.error}`; batch.appendChild(d); continue; }
     done++;

@@ -579,7 +579,10 @@ def separate_file(in_path: str | Path, out_dir: str | Path,
                   natural: float = DEFAULT_NATURAL,
                   repair_opts: dict | None = None,
                   clip_start: float = 0.0, clip_len: float | None = None,
-                  loudness: str | None = None) -> dict:
+                  loudness: str | None = None,
+                  loudness_target: float | None = None,
+                  loudness_basis: str = "mix",
+                  loudness_ceiling_db: float = -1.0) -> dict:
     """File-in / files-out. Returns paths + metadata. Used by Web, Mac and CLI.
 
     clip_start / clip_len (seconds) implement the trial-separation preview:
@@ -602,19 +605,41 @@ def separate_file(in_path: str | Path, out_dir: str | Path,
                    "full_duration_sec": round(full_n / sr, 3)}
     result = separate(data, sr, engine=engine, strength=strength, natural=natural, repair_opts=repair_opts)
     loudness_info = None
-    if loudness:
-        from .loudness import PRESETS, gain_for_target
-        if loudness in PRESETS:
-            gain_db, measured, limited = gain_for_target(data, sr, PRESETS[loudness])
-            lin = float(10 ** (gain_db / 20.0))
-            result.voice = (result.voice * lin).astype(np.float32)
-            result.noise = (result.noise * lin).astype(np.float32)
-            result.extra_stems = {k: (v * lin).astype(np.float32)
-                                  for k, v in result.extra_stems.items()}
-            data = (data * lin).astype(np.float32)  # invariant check vs gained original
-            loudness_info = {"preset": loudness, "target_lufs": PRESETS[loudness],
-                             "measured_lufs": round(measured, 2),
-                             "gain_db": round(gain_db, 2), "peak_limited": limited}
+    target_lufs = None
+    from .loudness import PRESETS
+    if loudness in PRESETS:
+        target_lufs = PRESETS[loudness]
+    elif loudness_target is not None:
+        target_lufs = float(min(max(loudness_target, -40.0), -6.0))
+    if target_lufs is not None:
+        from .loudness import gain_for_target
+        # Measure on the chosen basis (whole mix or the voice stem), then
+        # apply ONE gain to every stem so balance + the sum invariant hold.
+        basis_data = result.voice if loudness_basis == "voice" else data
+        ceiling_lin = float(10 ** (loudness_ceiling_db / 20.0))
+        gain_db, measured, limited = gain_for_target(basis_data, sr, target_lufs,
+                                                     peak_ceiling=ceiling_lin)
+        # The basis peak is not the whole story: cap the gain so NO stem
+        # (e.g. a loud event left in the noise stem) can clip either.
+        all_peak = float(np.max(np.abs(data))) if data.size else 0.0
+        for arr in result.extra_stems.values():
+            if arr.size:
+                all_peak = max(all_peak, float(np.max(np.abs(arr))))
+        if all_peak > 0:
+            max_gain_db = 20 * float(np.log10(ceiling_lin / all_peak))
+            if gain_db > max_gain_db:
+                gain_db, limited = max_gain_db, True
+        lin = float(10 ** (gain_db / 20.0))
+        result.voice = (result.voice * lin).astype(np.float32)
+        result.noise = (result.noise * lin).astype(np.float32)
+        result.extra_stems = {k: (v * lin).astype(np.float32)
+                              for k, v in result.extra_stems.items()}
+        data = (data * lin).astype(np.float32)  # invariant check vs gained original
+        loudness_info = {"preset": loudness, "target_lufs": target_lufs,
+                         "measured_lufs": round(measured, 2),
+                         "basis": loudness_basis,
+                         "ceiling_db": loudness_ceiling_db,
+                         "gain_db": round(gain_db, 2), "peak_limited": limited}
     stem = in_path.stem
     voice_path = out_dir / f"{stem}_VOICE.wav"
     noise_path = out_dir / f"{stem}_NOISE.wav"
